@@ -1,0 +1,6 @@
+target
+.idea
+.git
+*.iml
+voice-assets/custom-voice-sources/raw
+voice-assets/custom-voice-sources/tmp

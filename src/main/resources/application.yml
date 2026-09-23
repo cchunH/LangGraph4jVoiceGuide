@@ -1,0 +1,95 @@
+server:
+  port: 8093
+
+spring:
+  application:
+    name: langgraph4j-voice-guide-agent
+
+langgraph4j:
+  voice-guide:
+    graph-id: voice-guided-experience-graph
+    llm:
+      provider: aliyun
+      aliyun:
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+        api-key: ${DASHSCOPE_API_KEY:}
+        model: ${DASHSCOPE_LLM_MODEL:qwen-plus}
+        temperature: 0.4
+        max-tokens: 1200
+        connect-timeout-seconds: ${DASHSCOPE_LLM_CONNECT_TIMEOUT_SECONDS:8}
+        read-timeout-seconds: ${DASHSCOPE_LLM_READ_TIMEOUT_SECONDS:18}
+        max-attempts: ${DASHSCOPE_LLM_MAX_ATTEMPTS:3}
+        retry-initial-delay-millis: ${DASHSCOPE_LLM_RETRY_INITIAL_DELAY_MILLIS:400}
+    asr:
+      provider: funasr
+      funasr:
+        websocket-url: ${FUNASR_WEBSOCKET_URL:ws://127.0.0.1:10095}
+        mode: 2pass
+        chunk-size: 5,10,5
+        chunk-interval: 10
+        itn: true
+        sample-rate: 16000
+        connect-timeout-seconds: 10
+        response-timeout-seconds: 90
+        wav-name-prefix: voice-guide-asr
+    tts:
+      provider: aliyun
+      route:
+        primary-mode: instruct
+        backup-mode: vc-realtime
+        backup-reserve-enabled: true
+        allow-primary-fallback: true
+      aliyun:
+        base-url: https://dashscope.aliyuncs.com/api/v1
+        api-key: ${DASHSCOPE_API_KEY:}
+        endpoint-path: /services/aigc/multimodal-generation/generation
+        model: ${DASHSCOPE_TTS_MODEL:qwen3-tts-instruct-flash}
+        voice: ${DASHSCOPE_TTS_VOICE:Cherry}
+        format: wav
+        sample-rate: 24000
+        language-type: Chinese
+        speech-rate: 0
+        pitch-rate: 0
+        volume: 50
+        optimize-instructions: true
+        connect-timeout-seconds: ${DASHSCOPE_TTS_CONNECT_TIMEOUT_SECONDS:8}
+        read-timeout-seconds: ${DASHSCOPE_TTS_READ_TIMEOUT_SECONDS:20}
+        voice-clone-realtime:
+          enabled: false
+          model: qwen3-tts-vc-realtime-2026-01-15
+          enrollment-model: qwen-voice-enrollment
+          websocket-url: wss://dashscope.aliyuncs.com/api-ws/v1/realtime
+          mode: commit
+          response-format: pcm
+          sample-rate: 24000
+          connect-timeout-seconds: 20
+          response-timeout-seconds: 90
+          storage-dir: ./voice-assets/custom-voice-sources
+          raw-source-dir: ./voice-assets/custom-voice-sources/raw
+          manifest-dir: ./voice-assets/custom-voice-sources/manifest
+          enrolled-voice-dir: ./voice-assets/custom-voice-sources/enrolled
+          temp-dir: ./voice-assets/custom-voice-sources/tmp
+          manifest-file: ./voice-assets/custom-voice-sources/manifest/voices.json
+          registered-voices:
+            default: ""
+            EDUCATION: ""
+            INTERNSHIP_EXPERIENCE: ""
+            WORK_EXPERIENCE: ""
+            PROJECT_EXPERIENCE: ""
+        profiles:
+          education:
+            speech-rate: 2
+            pitch-rate: 3
+            volume: 52
+          internship-experience:
+            speech-rate: 4
+            pitch-rate: 5
+            volume: 54
+          work-experience:
+            speech-rate: 1
+            pitch-rate: 2
+            volume: 50
+          project-experience:
+            speech-rate: 3
+            pitch-rate: 4
+            volume: 53

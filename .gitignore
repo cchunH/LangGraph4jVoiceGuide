@@ -1,0 +1,18 @@
+target/
+.idea/
+.vscode/
+*.iml
+*.log
+
+# Runtime-generated voice assets and enrolled voice metadata must not enter Git.
+voice-assets/
+
+# Local/production environment secrets.
+.env
+.env.*
+!.env.example
+
+# Local backup copies created during server maintenance.
+*.bak
+*.bak-*
+
