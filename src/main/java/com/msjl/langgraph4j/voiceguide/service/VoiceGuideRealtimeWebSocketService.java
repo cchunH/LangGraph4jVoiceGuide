@@ -37,6 +37,8 @@ public class VoiceGuideRealtimeWebSocketService {
     private static final int MAX_BUFFERED_AUDIO_BYTES = 20 * 1024 * 1024;
     private static final int STREAMING_PCM_CHUNK_BYTES = 3_200;
     private static final long STREAMING_PCM_CHUNK_DELAY_MS = 25L;
+    private static final long ASR_FINAL_GRACE_MS = 1_500L;
+    private static final long ASR_EMPTY_TIMEOUT_MS = 8_000L;
 
     private final VoiceGuideProperties properties;
     private final VoiceGuideOrchestrationService voiceGuideOrchestrationService;
@@ -125,6 +127,7 @@ public class VoiceGuideRealtimeWebSocketService {
         }
         if (context.funasrSocket != null) {
             context.funasrSocket.sendText("{\"is_speaking\":false}", true).join();
+            onAsrStopSent(context);
         }
     }
 
@@ -150,6 +153,7 @@ public class VoiceGuideRealtimeWebSocketService {
                 Thread.sleep(STREAMING_PCM_CHUNK_DELAY_MS);
             }
             context.funasrSocket.sendText("{\"is_speaking\":false}", true).join();
+            onAsrStopSent(context);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             fail(context.frontSession.getId(), ex);
@@ -314,9 +318,12 @@ public class VoiceGuideRealtimeWebSocketService {
         result.setRequestId(root.path("request_id").asText(null));
         result.setWavName(root.path("wav_name").asText(context.wavName));
         result.setText(context.currentTranscript.toString().trim());
-        result.setFinalResult(isTerminal(mode, isFinal));
+        // A 2pass segment may be marked final while the user is still speaking.
+        // Only finish this voice round after the client explicitly sends stop.
+        result.setFinalResult(context.asrStopSent && isTerminal(mode, isFinal));
 
         if (!result.getText().isBlank()) {
+            context.latestAsr = result;
             String eventType = result.getFinalResult() ? "asr_final" : "asr_partial";
             ObjectNode eventNode = objectMapper.createObjectNode()
                     .put("type", eventType)
@@ -327,10 +334,58 @@ public class VoiceGuideRealtimeWebSocketService {
             sendText(context.frontSession, eventNode.toString());
         }
 
-        if (result.getFinalResult() && context.completed.compareAndSet(false, true)) {
-            context.finalAsr = result;
-            voiceGuideStreamTaskExecutor.execute(() -> generateGuideAndRespond(context));
+        if (result.getFinalResult()) {
+            completeAsr(context, result, false);
+        } else if (context.asrStopSent && "2pass-offline".equalsIgnoreCase(mode)
+                && !result.getText().isBlank()) {
+            completeAsr(context, result, true);
         }
+    }
+
+    private void onAsrStopSent(BridgeContext context) {
+        context.asrStopSent = true;
+        log.info("语音录制结束，等待 ASR 最终结果 | sessionId={} | format={} | currentTextLength={}",
+                context.request.getSessionId(), context.audioFormat,
+                context.latestAsr == null ? 0 : context.latestAsr.getText().length());
+        CompletableFuture.delayedExecutor(ASR_FINAL_GRACE_MS, TimeUnit.MILLISECONDS)
+                .execute(() -> finishFromLatestAsr(context, false));
+        CompletableFuture.delayedExecutor(ASR_EMPTY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .execute(() -> finishFromLatestAsr(context, true));
+    }
+
+    private void finishFromLatestAsr(BridgeContext context, boolean failIfEmpty) {
+        if (!contexts.containsKey(context.frontSession.getId()) || context.completed.get()) return;
+        AsrTranscriptionResult latest = context.latestAsr;
+        if (latest != null && latest.getText() != null && !latest.getText().isBlank()) {
+            try {
+                completeAsr(context, latest, true);
+            } catch (Exception ex) {
+                log.error("发送 ASR 最终结果失败 | sessionId={}", context.request.getSessionId(), ex);
+                fail(context.frontSession.getId(), ex);
+            }
+        } else if (failIfEmpty) {
+            log.warn("录音结束后仍无有效 ASR 文本 | sessionId={}", context.request.getSessionId());
+            fail(context.frontSession.getId(), new IllegalStateException("未识别到语音内容，请重新录制"));
+        }
+    }
+
+    private void completeAsr(BridgeContext context, AsrTranscriptionResult result,
+                             boolean synthesizeFinalEvent) throws Exception {
+        if (!context.completed.compareAndSet(false, true)) return;
+        result.setFinalResult(true);
+        context.finalAsr = result;
+        if (synthesizeFinalEvent) {
+            ObjectNode eventNode = objectMapper.createObjectNode()
+                    .put("type", "asr_final")
+                    .put("sessionId", context.request.getSessionId())
+                    .put("text", result.getText())
+                    .put("timestamp", System.currentTimeMillis());
+            eventNode.set("asr", objectMapper.valueToTree(result));
+            sendText(context.frontSession, eventNode.toString());
+        }
+        log.info("ASR 最终结果已确认，开始 AI 分析 | sessionId={} | mode={} | textLength={} | fallback={}",
+                context.request.getSessionId(), result.getMode(), result.getText().length(), synthesizeFinalEvent);
+        voiceGuideStreamTaskExecutor.execute(() -> generateGuideAndRespond(context));
     }
 
     private boolean isTerminal(String mode, boolean isFinalFlag) {
@@ -478,7 +533,9 @@ public class VoiceGuideRealtimeWebSocketService {
         private final java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean(false);
         private final java.util.concurrent.atomic.AtomicBoolean bufferedProcessingStarted = new java.util.concurrent.atomic.AtomicBoolean(false);
         private volatile boolean stopRequested;
+        private volatile boolean asrStopSent;
         private volatile AsrTranscriptionResult finalAsr;
+        private volatile AsrTranscriptionResult latestAsr;
 
         private BridgeContext(WebSocketSession frontSession) {
             this.frontSession = frontSession;
