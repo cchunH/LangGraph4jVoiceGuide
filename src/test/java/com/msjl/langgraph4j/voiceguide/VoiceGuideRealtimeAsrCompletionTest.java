@@ -20,6 +20,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -29,6 +31,52 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class VoiceGuideRealtimeAsrCompletionTest {
+
+    @Test
+    void transcriptionOnlyStartDoesNotRequireResumeExperienceType() throws Exception {
+        WebSocketSession socket = mock(WebSocketSession.class);
+        when(socket.getId()).thenReturn("ws-mock-interview-start-test");
+        when(socket.isOpen()).thenReturn(true);
+        VoiceGuideRealtimeWebSocketService service = new VoiceGuideRealtimeWebSocketService(
+                new VoiceGuideProperties(), mock(VoiceGuideOrchestrationService.class),
+                mock(AudioTranscodingService.class), new ObjectMapper(), mock(AsyncTaskExecutor.class));
+        service.registerSession(socket);
+
+        VoiceGuideAudioRequest request = new VoiceGuideAudioRequest();
+        request.setSessionId("mock-interview-start-test");
+        request.setResponseMode("transcription");
+        request.setAudioFormat("mp3");
+
+        assertDoesNotThrow(() -> service.startStreaming(socket.getId(), request));
+
+        org.mockito.ArgumentCaptor<org.springframework.web.socket.WebSocketMessage> messageCaptor =
+                org.mockito.ArgumentCaptor.forClass(org.springframework.web.socket.WebSocketMessage.class);
+        verify(socket).sendMessage(messageCaptor.capture());
+        String payload = ((TextMessage) messageCaptor.getValue()).getPayload();
+        assertTrue(payload.contains("\"type\":\"started\""));
+        assertTrue(payload.contains("\"sessionId\":\"mock-interview-start-test\""));
+        service.cleanup(socket.getId());
+    }
+
+    @Test
+    void analysisStartStillRequiresResumeExperienceType() {
+        WebSocketSession socket = mock(WebSocketSession.class);
+        when(socket.getId()).thenReturn("ws-analysis-start-test");
+        when(socket.isOpen()).thenReturn(true);
+        VoiceGuideRealtimeWebSocketService service = new VoiceGuideRealtimeWebSocketService(
+                new VoiceGuideProperties(), mock(VoiceGuideOrchestrationService.class),
+                mock(AudioTranscodingService.class), new ObjectMapper(), mock(AsyncTaskExecutor.class));
+        service.registerSession(socket);
+
+        VoiceGuideAudioRequest request = new VoiceGuideAudioRequest();
+        request.setSessionId("analysis-start-test");
+        request.setAudioFormat("mp3");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.startStreaming(socket.getId(), request));
+        assertEquals("experienceType is required", error.getMessage());
+        service.cleanup(socket.getId());
+    }
 
     @Test
     void transcriptionOnlyCompletesWithoutStartingGuideAnalysis() throws Exception {

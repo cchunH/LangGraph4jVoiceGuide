@@ -58,7 +58,9 @@ public class VoiceGuideStreamWebSocketHandler extends BinaryWebSocketHandler {
             }
             throw new IllegalArgumentException("Unsupported websocket message type: " + type);
         } catch (Exception ex) {
-            throw new IllegalStateException("Failed to process websocket text message", ex);
+            log.warn("语音引导 WebSocket 消息处理失败 | sessionId={} | message={}",
+                    session.getId(), ex.getMessage(), ex);
+            realtimeWebSocketService.fail(session.getId(), ex);
         }
     }
 

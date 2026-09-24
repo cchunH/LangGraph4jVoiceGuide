@@ -200,7 +200,12 @@ public class VoiceGuideRealtimeWebSocketService {
     }
 
     private VoiceGuideAudioRequest normalizeRequest(VoiceGuideAudioRequest request) {
-        if (request == null || request.getExperienceType() == null) {
+        if (request == null) {
+            throw new IllegalArgumentException("request is required");
+        }
+        // Mock interviews only use this websocket as an ASR transport. Resume
+        // experience classification is only meaningful for guide analysis.
+        if (!request.isTranscriptionOnly() && request.getExperienceType() == null) {
             throw new IllegalArgumentException("experienceType is required");
         }
         if (request.getSessionId() == null || request.getSessionId().isBlank()) {
@@ -225,12 +230,16 @@ public class VoiceGuideRealtimeWebSocketService {
     }
 
     private String buildStartEvent(VoiceGuideAudioRequest request) throws Exception {
-        return objectMapper.createObjectNode()
+        ObjectNode event = objectMapper.createObjectNode()
                 .put("type", "started")
                 .put("sessionId", request.getSessionId())
-                .put("experienceType", request.getExperienceType().name())
-                .put("timestamp", System.currentTimeMillis())
-                .toString();
+                .put("timestamp", System.currentTimeMillis());
+        if (request.getExperienceType() == null) {
+            event.putNull("experienceType");
+        } else {
+            event.put("experienceType", request.getExperienceType().name());
+        }
+        return event.toString();
     }
 
     private String buildErrorEvent(BridgeContext context, Throwable error) throws Exception {
