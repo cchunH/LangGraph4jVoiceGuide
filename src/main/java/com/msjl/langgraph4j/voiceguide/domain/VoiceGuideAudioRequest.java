@@ -19,6 +19,7 @@ public class VoiceGuideAudioRequest {
     private String globalInstruction;
     private String hotwords;
     private String audioFormat;
+    private String responseMode;
     private Boolean includeAudio = Boolean.TRUE;
     @Valid
     private List<ConversationTurn> conversationHistory = new ArrayList<>();
@@ -85,6 +86,18 @@ public class VoiceGuideAudioRequest {
 
     public void setAudioFormat(String audioFormat) {
         this.audioFormat = audioFormat;
+    }
+
+    public String getResponseMode() {
+        return responseMode;
+    }
+
+    public void setResponseMode(String responseMode) {
+        this.responseMode = responseMode;
+    }
+
+    public boolean isTranscriptionOnly() {
+        return "transcription".equalsIgnoreCase(responseMode);
     }
 
     public Boolean getIncludeAudio() {

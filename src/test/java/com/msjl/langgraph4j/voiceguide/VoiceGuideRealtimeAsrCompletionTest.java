@@ -24,10 +24,47 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class VoiceGuideRealtimeAsrCompletionTest {
+
+    @Test
+    void transcriptionOnlyCompletesWithoutStartingGuideAnalysis() throws Exception {
+        WebSocketSession socket = mock(WebSocketSession.class);
+        when(socket.getId()).thenReturn("ws-transcription-only-test");
+        when(socket.isOpen()).thenReturn(true);
+        VoiceGuideOrchestrationService orchestration = mock(VoiceGuideOrchestrationService.class);
+        AsyncTaskExecutor executor = mock(AsyncTaskExecutor.class);
+        VoiceGuideRealtimeWebSocketService service = new VoiceGuideRealtimeWebSocketService(
+                new VoiceGuideProperties(), orchestration, mock(AudioTranscodingService.class),
+                new ObjectMapper(), executor);
+        service.registerSession(socket);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> contexts = (Map<String, Object>) ReflectionTestUtils.getField(service, "contexts");
+        Object context = contexts.get(socket.getId());
+        VoiceGuideAudioRequest request = new ObjectMapper().readValue(
+                "{\"sessionId\":\"mock-asr-test\",\"responseMode\":\"transcription\",\"experienceType\":\"EDUCATION\"}",
+                VoiceGuideAudioRequest.class);
+        ReflectionTestUtils.setField(context, "request", request);
+
+        // A segment is only terminal after the client explicitly stops recording.
+        ReflectionTestUtils.setField(context, "asrStopSent", true);
+        ReflectionTestUtils.invokeMethod(service, "handleFunAsrMessage", context,
+                new ObjectMapper().readTree("{\"mode\":\"2pass-offline\",\"text\":\"我在清华大学读本科\",\"is_final\":true}"));
+
+        org.mockito.ArgumentCaptor<org.springframework.web.socket.WebSocketMessage> messages =
+                org.mockito.ArgumentCaptor.forClass(org.springframework.web.socket.WebSocketMessage.class);
+        verify(socket, org.mockito.Mockito.atLeast(2)).sendMessage(messages.capture());
+        assertTrue(messages.getAllValues().stream().map(message -> ((TextMessage) message).getPayload())
+                .anyMatch(payload -> payload.contains("\"type\":\"asr_final\"")));
+        assertTrue(messages.getAllValues().stream().map(message -> ((TextMessage) message).getPayload())
+                .anyMatch(payload -> payload.contains("\"type\":\"complete\"")));
+        verify(executor, never()).execute(any(Runnable.class));
+        verify(orchestration, never()).generate(any(VoiceGuideRequest.class));
+        service.cleanup(socket.getId());
+    }
 
     @Test
     void stoppedTwoPassSessionCompletesFromRecognizedTextWithoutIsFinalFlag() throws Exception {

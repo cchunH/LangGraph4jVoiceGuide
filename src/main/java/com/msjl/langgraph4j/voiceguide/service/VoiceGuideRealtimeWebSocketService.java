@@ -383,6 +383,16 @@ public class VoiceGuideRealtimeWebSocketService {
             eventNode.set("asr", objectMapper.valueToTree(result));
             sendText(context.frontSession, eventNode.toString());
         }
+        if (context.request.isTranscriptionOnly()) {
+            log.info("ASR 最终结果已确认，仅转写流程结束 | sessionId={} | mode={} | textLength={} | fallback={}",
+                    context.request.getSessionId(), result.getMode(), result.getText().length(), synthesizeFinalEvent);
+            sendText(context.frontSession, objectMapper.createObjectNode()
+                    .put("type", "complete")
+                    .put("sessionId", context.request.getSessionId())
+                    .put("timestamp", System.currentTimeMillis())
+                    .toString());
+            return;
+        }
         log.info("ASR 最终结果已确认，开始 AI 分析 | sessionId={} | mode={} | textLength={} | fallback={}",
                 context.request.getSessionId(), result.getMode(), result.getText().length(), synthesizeFinalEvent);
         voiceGuideStreamTaskExecutor.execute(() -> generateGuideAndRespond(context));
